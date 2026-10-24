@@ -70,7 +70,14 @@ copied, so nothing is added to `THIRD_PARTY_NOTICES.md`.
   the address) is compared per colour (lesson 11: MAC against MAC); a
   change holds the colour back ("MAC changed: two Tilts of this colour, or
   a Tilt replaced") until the same new fingerprint is read twice in a row
-  (`MAC_CONFIRM`); an unreadable MAC changes nothing.
+  (`MAC_CONFIRM`): a replaced Tilt comes back. Review r2: two Tilts taking
+  turns at random give two identical reads in a row half the time, so a
+  replaced fingerprint coming back within 24 hours (A -> B -> A, or A
+  during B's confirmation; wall-clock instants kept under `/data`) locks
+  the colour (`MAC_LOCK`): nothing published until a single fingerprint
+  has been read alone for 24 hours; another fingerprint restarts the 24
+  hours; neither a restart nor a saved configuration lifts it; status "turn
+  on ID by MAC". An unreadable MAC changes nothing.
 - **Units**: the core has no density category nor unit
   (`DEVICE_FEATURE_UNITS_BY_CATEGORY`, checked in
   `~/code/Gladys/server/utils/constants.js`): the gravity is an `unknown`

@@ -30,7 +30,9 @@ Gladys ⇄ SDK ⇄ src/app.js (TiltPiApp)   what is due, pause, devices, states,
   `Date` header, on their age alone: current up to 3 minutes, dated up to
   15; undated ones only once a change proves the Tilt alive. A silent Tilt
   sends nothing. `Temp` is always °F (the Tilt Pi flow). A changed MAC
-  fingerprint on a colour holds it back until read twice in a row.
+  fingerprint on a colour holds it back until read twice in a row; a
+  replaced one coming back within 24 h locks the colour for 24 h of one
+  MAC alone.
 - **429/5xx** → `Retry-After`, else 5 minutes doubling, between 1 minute
   and 6 hours, persisted.
 - **Devices**: `tilt:<colour>` (the eight Tilt colours), features

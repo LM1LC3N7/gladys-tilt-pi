@@ -113,9 +113,16 @@ Un appareil Gladys par **couleur** de Tilt (« Tilt Red », « Tilt Blue »...) 
   celui-ci n'a qu'une entrée par couleur, remplie tour à tour par les deux.
   L'intégration garde une empreinte de l'adresse MAC de chaque couleur : si
   elle change, rien n'est envoyé pour cette couleur et le statut affiche
-  « MAC changée : deux Tilt de cette couleur, ou Tilt remplacé ». Les
-  valeurs reprennent quand la même nouvelle adresse est lue deux fois de
-  suite (un Tilt remplacé) ; deux Tilt qui alternent ne reprennent jamais.
+  « MAC changée : deux Tilt de cette couleur, ou Tilt remplacé ». Un Tilt
+  remplacé (l'ancienne adresse ne revient pas) reprend quand la même
+  nouvelle adresse est lue deux fois de suite. Si une adresse déjà
+  remplacée revient dans les 24 heures (A, puis B, puis A : deux Tilt qui
+  se relaient), la couleur est **verrouillée** : rien n'est envoyé pour
+  elle, et le statut affiche « deux Tilt de cette couleur (adresses MAC qui
+  alternent) : activez « ID by MAC » sur le Tilt Pi », jusqu'à ce qu'une
+  seule adresse ait été lue seule pendant 24 heures. Le verrou est gardé
+  sous `/data` : ni un redémarrage ni une configuration enregistrée ne le
+  lèvent.
   Activez plutôt l'option **« ID by MAC »** du Tilt Pi : chaque Tilt a alors
   son entrée (`RED:aa:bb:...`), lue comme la couleur rouge ; si deux entrées
   ont la même couleur, aucune n'est envoyée (« deux Tilt de cette
@@ -128,7 +135,9 @@ Un appareil Gladys par **couleur** de Tilt (« Tilt Red », « Tilt Blue »...) 
 L'adresse lue, l'heure de la dernière requête, la pause, et pour chaque
 couleur rencontrée la clé de la dernière mesure vue (son heure, ou une
 empreinte courte de l'entrée) et une empreinte de 8 caractères de l'adresse
-MAC du Tilt (jamais l'adresse en clair), jamais les valeurs. Le fichier est écrit au plus une fois par minute, sauf pour une
+MAC du Tilt (jamais l'adresse en clair), avec l'heure de leur dernière
+lecture et le verrou d'une couleur partagée par deux Tilt, jamais les
+valeurs. Le fichier est écrit au plus une fois par minute, sauf pour une
 pause ou une nouvelle couleur.
 
 8 couleurs au plus ; 50 entrées au plus sont lues ; une réponse de plus de

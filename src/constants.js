@@ -54,6 +54,13 @@ export const CURRENT = 3 * 60_000;
 /** A changed MAC fingerprint must be read this many times in a row before its values count. */
 export const MAC_CONFIRM = 2;
 
+/**
+ * A replaced MAC fingerprint coming back within this (A -> B -> A) locks the
+ * colour: two Tilts of one colour take turns in one Tilt Pi slot. The lock
+ * is lifted only once a single fingerprint has been read alone this long.
+ */
+export const MAC_LOCK = 24 * 60 * 60_000;
+
 /** A reading more than this in the future of the Tilt Pi clock is ignored. */
 export const FUTURE_TOLERANCE = 5 * 60_000;
 

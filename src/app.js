@@ -17,6 +17,7 @@ import {
   CURRENT,
   FUTURE_TOLERANCE,
   MAC_CONFIRM,
+  MAC_LOCK,
   HEARTBEAT,
   STALE,
   TEST_DEADLINE,
@@ -43,7 +44,20 @@ const asSourceError = (err) => (err instanceof SourceError ? err : new SourceErr
 /** The raw `timeStamp` behind a reading key (`t<ms>`), or null. */
 const stampOfKey = (key) => (/^t\d+$/.test(key) ? Number(key.slice(1)) : null);
 
-const newTilt = (color, { key = '', mac = '', candidate = '', seen = 0 } = {}) => ({
+const newTilt = (
+  color,
+  {
+    key = '',
+    mac = '',
+    macAt = 0,
+    candidate = '',
+    seen = 0,
+    prev = '',
+    prevAt = 0,
+    lock = '',
+    lockSince = 0,
+  } = {},
+) => ({
   color,
   /** The key of the last reading seen (kept under /data). */
   key,
@@ -52,6 +66,13 @@ const newTilt = (color, { key = '', mac = '', candidate = '', seen = 0 } = {}) =
   /** A different fingerprint being confirmed, and how many reads in a row showed it. */
   candidate,
   seen,
+  /** When `mac` was last read; the fingerprint it replaced and when it was last read. */
+  macAt,
+  prev,
+  prevAt,
+  /** Two Tilts of one colour: the fingerprint read alone since `lockSince`, or ''. */
+  lock,
+  lockSince,
   /** Whether the temperature disagreed with the Tilt Pi display at the last read. */
   incoherent: false,
   /** Whether the last read brought a new, recent reading of this Tilt. */
@@ -290,20 +311,50 @@ export class TiltPiApp {
 
   /**
    * The MAC fingerprint of a reading, against the one of its colour.
-   * Returns whether its values may count. A new fingerprint is held back
-   * until it is read MAC_CONFIRM times in a row (a replaced Tilt comes back;
-   * two Tilts of one colour taking turns never do); an unreadable one
-   * changes nothing.
+   * Returns whether its values may count. Wall-clock instants (they are kept
+   * under /data and must survive a restart).
+   *
+   * - A new fingerprint is held back until read MAC_CONFIRM times in a row:
+   *   a replaced Tilt (A -> B, A never back) comes back after 2 reads.
+   * - A replaced fingerprint coming back within MAC_LOCK (A -> B -> A, or
+   *   A -> B held then A) locks the colour: two Tilts of one colour taking
+   *   turns, at random, in one slot. Nothing is published until a single
+   *   fingerprint has been read alone for MAC_LOCK; a saved configuration
+   *   or a restart never lifts the lock.
+   * - An unreadable fingerprint changes nothing.
    */
-  checkMac(tilt, print) {
+  checkMac(tilt, print, wall) {
     if (print === null) {
-      return !tilt.candidate;
+      return !tilt.candidate && !tilt.lock;
+    }
+    if (tilt.lock) {
+      if (print !== tilt.lock || tilt.lockSince > wall) {
+        tilt.lock = print;
+        tilt.lockSince = wall;
+        return false;
+      }
+      if (wall - tilt.lockSince < MAC_LOCK) {
+        return false;
+      }
+      Object.assign(tilt, { mac: print, macAt: wall, candidate: '', seen: 0 });
+      Object.assign(tilt, { prev: '', prevAt: 0, lock: '', lockSince: 0 });
+      return true;
     }
     if (!tilt.mac) {
       tilt.mac = print;
+      tilt.macAt = wall;
       return true;
     }
+    const recent = (at) => wall - at < MAC_LOCK && at <= wall;
+    const back =
+      (tilt.candidate && print === tilt.mac) ||
+      (tilt.prev && print === tilt.prev && recent(tilt.prevAt));
+    if (back) {
+      Object.assign(tilt, { candidate: '', seen: 0, lock: print, lockSince: wall });
+      return false;
+    }
     if (!tilt.candidate && print === tilt.mac) {
+      tilt.macAt = wall;
       return true;
     }
     if (print === tilt.candidate) {
@@ -313,9 +364,8 @@ export class TiltPiApp {
       tilt.seen = 1;
     }
     if (tilt.seen >= MAC_CONFIRM) {
-      tilt.mac = print;
-      tilt.candidate = '';
-      tilt.seen = 0;
+      Object.assign(tilt, { prev: tilt.mac, prevAt: tilt.macAt });
+      Object.assign(tilt, { mac: print, macAt: wall, candidate: '', seen: 0 });
       return true;
     }
     return false;
@@ -373,7 +423,7 @@ export class TiltPiApp {
       const isNew = reading.key !== tilt.key;
       const proven = age !== null ? age <= STALE : tilt.key !== '';
       tilt.key = reading.key;
-      const macOk = this.checkMac(tilt, reading.mac);
+      const macOk = this.checkMac(tilt, reading.mac, readAt);
       const { values, outOfRange, incoherent } = valuesOf(reading);
       tilt.outOfRange = outOfRange;
       tilt.incoherent = incoherent;
@@ -437,6 +487,11 @@ export class TiltPiApp {
       mac: t.mac,
       candidate: t.candidate,
       seen: t.seen,
+      macAt: t.macAt,
+      prev: t.prev,
+      prevAt: t.prevAt,
+      lock: t.lock,
+      lockSince: t.lockSince,
     }));
   }
 
@@ -543,6 +598,8 @@ export class TiltPiApp {
     for (const tilt of this.sorted()) {
       if (tilt.twice) {
         list.push({ name: `Tilt ${colorName(tilt.color)}`, kind: 'twice' });
+      } else if (tilt.lock) {
+        list.push({ name: `Tilt ${colorName(tilt.color)}`, kind: 'locked' });
       } else if (tilt.candidate) {
         list.push({ name: `Tilt ${colorName(tilt.color)}`, kind: 'mac' });
       } else if (!tilt.live) {
@@ -612,6 +669,9 @@ export class TiltPiApp {
     const name = `Tilt ${colorName(tilt.color)}`;
     if (tilt.twice) {
       return `- ${name}${colon} ${reason('twice')[lang]}`;
+    }
+    if (tilt.lock) {
+      return `- ${name}${colon} ${reason('locked')[lang]}`;
     }
     if (tilt.candidate) {
       return `- ${name}${colon} ${reason('mac')[lang]}`;

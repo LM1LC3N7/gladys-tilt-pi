@@ -171,36 +171,97 @@ test('{} (no Tilt heard) is a working Tilt Pi with no Tilt, not an error', async
   assert.match(gladys.fake.connectionStatus.message.en, /not a Tilt Pi answer/);
 });
 
-test('a changed MAC holds the colour back until read twice in a row', async () => {
-  const { app, gladys, clock, tilt } = await setup({ devices: devicesFor('red') });
-  const A = 'AA:BB:CC:DD:EE:01';
-  const B = 'AA:BB:CC:DD:EE:02';
-  const read = async (mac, sg) => {
-    tilt.body = (c) => [entry('red', { mac, sg, stamp: c.wall - 1_000 })];
-    clock.advance(5 * MIN);
-    await app.tick();
+const MAC_A = 'AA:BB:CC:DD:EE:01';
+const MAC_B = 'AA:BB:CC:DD:EE:02';
+
+/** A red Tilt read every `step`: `read(mac, sg)` reads one entry of that MAC. */
+async function redOnly({ storage } = {}) {
+  const s = await setup({ devices: devicesFor('red'), start: false, storage });
+  s.read = async (mac, sg, step = 5 * MIN) => {
+    s.tilt.body = (c) => [entry('red', { mac, sg, stamp: c.wall - 1_000 })];
+    s.clock.advance(step);
+    await s.app.tick();
   };
-  assert.equal(gladys.fake.lastState(`${RED}:gravity`), 1.05);
-  // Two Tilts of one colour taking turns: nothing after the first change.
-  await read(B, 1.008);
-  await read(A, 1.052);
-  await read(B, 1.008);
-  assert.deepEqual(
-    statesOf(gladys, `${RED}:gravity`).map((st) => st.state),
-    [1.05],
-  );
+  s.tilt.body = (c) => [entry('red', { mac: MAC_A, sg: 1.05, stamp: c.wall - 1_000 })];
+  await s.app.start(CONFIG);
+  s.published = () => statesOf(s.gladys, `${RED}:gravity`).map((st) => st.state);
+  return s;
+}
+
+test('a replaced Tilt (A -> B, A never back) counts again after 2 reads', async () => {
+  const { read, published, gladys } = await redOnly();
+  await read(MAC_B, 1.008);
+  assert.deepEqual(published(), [1.05]);
   assert.match(gladys.fake.connectionStatus.message.en, /Tilt Red \(MAC changed/);
-  // An unreadable MAC changes nothing (still held).
   await read('??', 1.007);
-  assert.equal(statesOf(gladys, `${RED}:gravity`).length, 1);
-  // A replaced Tilt: the same new MAC twice in a row, then it counts again.
-  await read(B, 1.006);
-  assert.deepEqual(
-    statesOf(gladys, `${RED}:gravity`).map((st) => st.state),
-    [1.05, 1.006],
+  assert.deepEqual(published(), [1.05], 'an unreadable MAC changes nothing');
+  await read(MAC_B, 1.006);
+  assert.deepEqual(published(), [1.05, 1.006]);
+  assert.doesNotMatch(gladys.fake.connectionStatus.message.en, /MAC changed|ID by MAC/);
+});
+
+test('A -> B -> A locks the colour until one MAC is read alone for 24 hours', async () => {
+  const { read, published, gladys, app } = await redOnly();
+  await read(MAC_B, 1.008);
+  await read(MAC_B, 1.007);
+  assert.deepEqual(published(), [1.05, 1.007], 'looked like a replaced Tilt');
+  await read(MAC_A, 1.052);
+  assert.match(
+    gladys.fake.connectionStatus.message.en,
+    /Tilt Red \(two Tilts of this colour \(MAC addresses taking turns\): turn on "ID by MAC"/,
   );
-  assert.doesNotMatch(gladys.fake.connectionStatus.message.en, /MAC changed/);
+  await read(MAC_A, 1.051, 12 * 60 * MIN);
+  await read(MAC_B, 1.006, 60 * MIN); // B again: the 24 hours start over
+  await read(MAC_B, 1.005, 23 * 60 * MIN);
+  await app.start(CONFIG); // a saved configuration never lifts the lock
+  assert.deepEqual(published(), [1.05, 1.007]);
+  await read(MAC_B, 1.004, 61 * MIN);
+  assert.deepEqual(published(), [1.05, 1.007, 1.004]);
   assert.doesNotMatch(JSON.stringify(app.store.get()), /AA:BB/i, 'only fingerprints in /data');
+});
+
+test('the lock survives a restart', async () => {
+  const { read, published, app, clock, storage, gladys } = await redOnly();
+  await read(MAC_B, 1.008);
+  await read(MAC_A, 1.052);
+  app.shutdown();
+  assert.ok(storage.load().tilts[0].lock, 'kept under /data');
+  const next = new TiltPiApp({
+    gladys,
+    now: () => clock.wall,
+    mono: () => clock.mono,
+    timers: createFakeTimers(),
+    storage,
+    logger: recordingLogger(),
+  });
+  clock.advance(5 * MIN);
+  await next.start(CONFIG);
+  clock.advance(5 * MIN);
+  await next.tick();
+  assert.deepEqual(published(), [1.05]);
+  assert.match(gladys.fake.connectionStatus.message.en, /turn on "ID by MAC"/);
+});
+
+test('two Tilts of one colour taking turns at random: nothing after the first return', async () => {
+  const { read, published } = await redOnly();
+  let seed = 20;
+  const random = () => {
+    seed = (seed * 1103515245 + 12345) % 2 ** 31;
+    return seed / 2 ** 31;
+  };
+  let seenB = false;
+  let atLock;
+  for (let i = 0; i < 200; i += 1) {
+    const a = random() < 0.5;
+    await read(a ? MAC_A : MAC_B, a ? 1.052 : 1.008);
+    seenB ||= !a;
+    if (a && seenB && atLock === undefined) {
+      atLock = published().length; // A came back after B: locked from here
+    }
+  }
+  assert.notEqual(atLock, undefined, 'the seed takes turns');
+  assert.equal(published().length, atLock, 'no value after the first return of A');
+  assert.ok(published().length <= 2);
 });
 
 test('"ID by MAC" mode: RED:mac is the red Tilt, same external ids', async () => {

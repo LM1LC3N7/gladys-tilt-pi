@@ -56,7 +56,8 @@ test/                             node --test, against the SDK's fake Gladys (in
   handed to Gladys once; with a `Date` header on the age alone (current up
   to 3 minutes, dated up to 15), an undated one only once a change proves
   the Tilt alive. `Temp` is always °F. A changed MAC fingerprint (8 hex)
-  holds a colour back until read twice in a row.
+  holds a colour back until read twice in a row; a replaced one coming
+  back within 24 h locks it (in `/data`) until one is read alone for 24 h.
   A silent Tilt sends nothing and is never shown alive.
 - **Pace.** Never read before the last request + the interval (test button,
   reconnection, saved configuration, Discovery, restart); the instant of a

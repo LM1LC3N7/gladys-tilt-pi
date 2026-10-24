@@ -106,9 +106,15 @@ One Gladys device per Tilt **colour** ("Tilt Red", "Tilt Blue"...):
   Tilt Pi, it has one entry per colour, filled in turn by both. The
   integration keeps a fingerprint of the MAC address of each colour: when
   it changes, nothing is sent for that colour and the status shows "MAC
-  changed: two Tilts of this colour, or a Tilt replaced". The values come
-  back when the same new address is read twice in a row (a replaced Tilt);
-  two Tilts taking turns never come back. Rather turn on the **"ID by MAC"**
+  changed: two Tilts of this colour, or a Tilt replaced". A replaced Tilt
+  (the old address never back) comes back when the same new address is read
+  twice in a row. If an address already replaced comes back within 24
+  hours (A, then B, then A again: two Tilts taking turns), the colour is
+  **locked**: nothing is sent for it, and the status shows "two Tilts of
+  this colour (MAC addresses taking turns): turn on "ID by MAC" on the Tilt
+  Pi", until a single address has been read alone for 24 hours. The lock is
+  kept under `/data`: neither a restart nor a saved configuration lifts it.
+  Rather turn on the **"ID by MAC"**
   option of the Tilt Pi: each Tilt then has its own entry
   (`RED:aa:bb:...`), read as the red colour; if two entries have the same
   colour, neither is sent ("two Tilts of this colour").
