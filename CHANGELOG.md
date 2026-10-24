@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-24
+
 ### Added
 
 - Your Tilt hydrometers in Gladys, read only, from the Tilt Pi app on your
@@ -34,3 +36,6 @@ the notes of the version's GitHub Release.
   (nothing is sent, the status says "no recent reading"); a reading is
   current up to 3 minutes old, dated up to 15 minutes, never older (on the
   Tilt Pi clock).
+
+[Unreleased]: https://github.com/LM1LC3N7/gladys-tilt-pi/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-tilt-pi/releases/tag/v0.1.1
