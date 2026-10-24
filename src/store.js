@@ -1,9 +1,9 @@
 // -----------------------------------------------------------------------------
 // What must survive a restart of the container (a file under /data): the
 // address read last, the instant of the last request to the Tilt Pi, the
-// end of a pause (429/5xx), and the Tilts met (colour and the key of the
-// last reading seen: nothing else), so a container restarting in a loop
-// never reads faster than the interval, a reading already published is never
+// end of a pause (429/5xx), and the Tilts met (colour, the key of the last
+// reading seen, 8-hex fingerprints of its MAC address, never the address
+// itself: nothing else), so a container restarting in a loop never reads faster than the interval, a reading already published is never
 // published again, and the Discovery list is not empty after a restart.
 //
 // The instant of a request is written at most once per minute (WRITE_GAP
@@ -89,12 +89,18 @@ function tiltOf(value) {
   if (!value || typeof value !== 'object' || !COLORS.includes(value.color)) {
     return undefined;
   }
+  const print = (v) => (typeof v === 'string' && /^[0-9a-f]{8}$/.test(v) ? v : '');
+  const candidate = print(value.candidate);
   return {
     color: value.color,
     key:
       typeof value.key === 'string' && /^(t\d{1,16}|d[0-9a-f]{16})$/.test(value.key)
         ? value.key
         : '',
+    // MAC fingerprints (8 hex), never a MAC address.
+    mac: print(value.mac),
+    candidate,
+    seen: candidate && Number.isInteger(value.seen) ? Math.min(Math.max(value.seen, 1), 5) : 0,
   };
 }
 

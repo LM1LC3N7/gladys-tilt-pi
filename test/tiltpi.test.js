@@ -10,7 +10,7 @@ import { parseAddress, normalizeConfig } from '../src/config.js';
 import { MAX_BODY, MAX_ENTRIES } from '../src/constants.js';
 import { fahrenheitToCelsius, valuesOf } from '../src/fields.js';
 import { setFetch } from '../src/http.js';
-import { parseHydrometers, readHydrometers, strictNumber } from '../src/tiltpi.js';
+import { macPrint, parseHydrometers, readHydrometers, strictNumber } from '../src/tiltpi.js';
 
 const parse = (value) => parseHydrometers(JSON.stringify(value));
 
@@ -40,7 +40,54 @@ test('numbers are parsed strictly: empty, null, exponent or text are unknown', (
   assert.equal(strictNumber(Number.NaN), null);
   assert.equal(strictNumber(true), null);
   const { tilts } = parse([{ Color: 'green', Temp: '', SG: null }]);
-  assert.deepEqual(valuesOf(tilts.get('green'), false), { values: {}, outOfRange: [] });
+  assert.deepEqual(valuesOf(tilts.get('green')), { values: {}, outOfRange: [], incoherent: false });
+});
+
+test('an empty object is no Tilt (the Tilt Pi flow answers {} without Tilt)', () => {
+  assert.equal(parseHydrometers('{}').tilts.size, 0);
+  assert.throws(() => parseHydrometers('{"a":1}'), { kind: 'invalid' });
+  assert.throws(() => parseHydrometers('null'), { kind: 'invalid' });
+});
+
+test('"ID by MAC" mode: COLOUR:mac, the colour stays the identity, the MAC is fingerprinted', () => {
+  const { tilts, unknown } = parse([
+    { Color: 'RED:aa:bb:cc:dd:ee:01', Temp: '68.0', SG: 1.05, timeStamp: Date.now() },
+    { Color: 'RED:zz', Temp: 1, SG: 1 },
+    { Color: 'BLUE', mac: 'AA:BB:CC:DD:EE:02', Temp: 68, SG: 1.05 },
+    { Color: 'GREEN', mac: 'not a mac', Temp: 68, SG: 1.05 },
+  ]);
+  assert.deepEqual([...tilts.keys()], ['red', 'blue', 'green']);
+  assert.equal(unknown, 1);
+  assert.equal(tilts.get('red').mac, macPrint('AA:BB:CC:DD:EE:01'));
+  assert.match(tilts.get('red').mac, /^[0-9a-f]{8}$/);
+  assert.notEqual(tilts.get('blue').mac, tilts.get('red').mac);
+  assert.equal(tilts.get('green').mac, null, 'unreadable');
+});
+
+test('the digest of an undated entry ignores the fields that move without a reading', () => {
+  const base = { Color: 'RED', mac: 'AA:BB:CC:DD:EE:01', Temp: '68.0', SG: 1.05 };
+  const a = parse([{ ...base, rssi: -70, clock: '18:00:01', Timepoint: 1 }]).tilts.get('red');
+  const b = parse([{ ...base, rssi: -75, clock: '18:00:02', Timepoint: 2 }]).tilts.get('red');
+  const c = parse([{ ...base, SG: 1.049 }]).tilts.get('red');
+  assert.equal(a.key, b.key);
+  assert.notEqual(a.key, c.key);
+});
+
+test('Temp is always °F; a disagreement with the display drops the temperature', () => {
+  const real = (extra) =>
+    parse([{ Color: 'RED', Temp: '68.0', SG: 1.05, ...extra }]).tilts.get('red');
+  // The Tilt Pi page in °C: Temp stays in °F, displayTemp follows the page.
+  assert.deepEqual(valuesOf(real({ tempunits: '°C', displayTemp: '20.0' })).values, {
+    gravity: 1.05,
+    temperature: 20,
+  });
+  assert.equal(valuesOf(real({ tempunits: '°F', displayTemp: '68.0' })).values.temperature, 20);
+  const odd = valuesOf(real({ tempunits: '°C', displayTemp: '68.0' }));
+  assert.equal(odd.values.temperature, undefined);
+  assert.equal(odd.incoherent, true);
+  // The 0 °F fallback of a broken calibration is out of range (-17.8 °C).
+  const zero = valuesOf(parse([{ Color: 'RED', Temp: '0.0', SG: 1.05 }]).tilts.get('red'));
+  assert.deepEqual(zero.outOfRange, ['temperature']);
 });
 
 test('the timeStamp dates a reading and is its key', () => {
@@ -105,8 +152,6 @@ test('the address: IP, host name, port, http only, no path, no broadcast', () =>
   assert.equal(normalizeConfig({ poll_interval: '0' }).pollMinutes, 1);
   assert.equal(normalizeConfig({ poll_interval: '' }).pollMinutes, 5);
   assert.equal(normalizeConfig({ poll_interval: 600 }).pollMinutes, 60);
-  assert.equal(normalizeConfig({}).celsius, false);
-  assert.equal(normalizeConfig({ temperature_unit: 'celsius' }).celsius, true);
 });
 
 /** A real HTTP server on 127.0.0.1, its handler set by each test. */

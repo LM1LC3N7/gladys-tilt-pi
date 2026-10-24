@@ -41,9 +41,18 @@ export const BUSY_MAX = 6 * 60 * 60_000;
  * A reading dated by the Tilt Pi (`timeStamp`) more than this old, on the
  * clock of the Tilt Pi (the `Date` of its answer), is never published: a
  * Tilt broadcasts every few seconds, a silent one is out of range, flat or
- * out of the fermenter.
+ * out of the fermenter (the Tilt Pi itself drops it after 120 s).
  */
 export const STALE = 15 * 60_000;
+
+/**
+ * A new reading at most this old is published as current; older (up to
+ * STALE) it is published dated (`created_at`: no scene fires).
+ */
+export const CURRENT = 3 * 60_000;
+
+/** A changed MAC fingerprint must be read this many times in a row before its values count. */
+export const MAC_CONFIRM = 2;
 
 /** A reading more than this in the future of the Tilt Pi clock is ignored. */
 export const FUTURE_TOLERANCE = 5 * 60_000;

@@ -56,10 +56,12 @@ Un appareil Gladys par **couleur** de Tilt (« Tilt Red », « Tilt Blue »...) 
   fixe dans votre box. Une nouvelle adresse est lue tout de suite (au plus
   une requête par minute).
 - **Intervalle de lecture** : 5 minutes par défaut, de 1 à 60.
-- **Unité de température envoyée par le Tilt Pi** : Fahrenheit par défaut,
-  comme la lit la bibliothèque `tilt-pi`. Si la température paraît fausse
-  dans Gladys (environ 20 °C affichés -7 °C), choisissez Celsius. Gladys
-  enregistre toujours des °C.
+- Pas de réglage d'unité : l'API du Tilt Pi donne toujours la température
+  en °F, même quand sa page affiche des °C (c'est ce que fait le flux
+  officiel de l'application). L'intégration la convertit en °C, et Gladys
+  l'affiche dans l'unité de votre profil. Si la température de l'API ne
+  correspond pas à celle qu'affiche la page du Tilt Pi, elle n'est pas
+  envoyée et le statut le signale.
 
 ## À quel rythme le Tilt Pi est lu
 
@@ -77,27 +79,47 @@ Un appareil Gladys par **couleur** de Tilt (« Tilt Red », « Tilt Blue »...) 
 - Quand le Tilt Pi répond **429 ou une erreur 5xx**, il est laissé
   tranquille pendant le délai `Retry-After` donné, sinon 5 minutes, puis 10,
   20... ; toujours entre 1 minute et 6 heures, aussi après un redémarrage.
+- **Aucun Tilt entendu** (entre deux brassins, ou quand le Tilt Pi vient de
+  vider ses emplacements après un Tilt muet plus de 2 minutes) est un cas
+  normal : le Tilt Pi répond `{}`, le statut reste connecté et les Tilt
+  connus passent en « pas de mesure récente ».
 - Pas de réponse, une page qui n'est pas celle d'un Tilt Pi (404, réponse
-  qui n'est pas une liste) ou un accès refusé : réessayé à l'intervalle
+  qui n'est ni une liste ni `{}`) ou un accès refusé : réessayé à l'intervalle
   suivant seulement.
 
 ## Quelles valeurs arrivent dans Gladys
 
 - Chaque mesure n'est remise à Gladys **qu'une fois**. Une mesure est
-  reconnue à son heure (`timeStamp`) quand le Tilt Pi la donne, sinon au
-  contenu de son entrée (un Tilt vivant change au moins son signal).
+  reconnue à son heure (`timeStamp`, que le Tilt Pi donne toujours), sinon à
+  sa température, sa densité, son adresse MAC et son `timeStamp` brut
+  (jamais au signal ni aux champs d'horloge que le Tilt Pi réécrit sans
+  nouvelle mesure).
+- Une mesure de 3 minutes au plus est envoyée comme valeur actuelle ; de 3
+  à 15 minutes, elle est envoyée **datée** (Gladys l'enregistre à son heure
+  et aucune scène ne se déclenche).
 - Un Tilt **muet** (hors de portée, pile vide, sorti du fermenteur) n'est
   **jamais présenté comme vivant** : quand sa mesure ne change plus, rien
   n'est envoyé, et le statut affiche « pas de mesure récente ». Une mesure
   datée de plus de 15 minutes, mesurée avec l'horloge du Tilt Pi (la `Date`
-  de sa réponse), n'est jamais envoyée. Sans heure, la première mesure vue
+  de sa réponse, l'âge seul décide : un Raspberry Pi remis à une heure
+  ancienne ne fait perdre aucune mesure), n'est jamais envoyée. Sans heure, la première mesure vue
   d'un Tilt n'est pas envoyée : seule une mesure qui a changé depuis la
   lecture précédente prouve que le Tilt est vivant.
 - Une valeur hors bornes (densité hors de 0,950 à 1,200, température hors de
-  -20 à 110 °C) n'est jamais envoyée ni ramenée dans les bornes ; le statut
-  la signale.
-- Deux Tilt de la même couleur sur le Tilt Pi : aucun des deux n'est envoyé
-  (impossible de savoir lequel est lequel), le statut le signale.
+  -10 à 60 °C, ce qu'un moût peut atteindre) n'est jamais envoyée ni
+  ramenée dans les bornes ; le statut la signale. Les 0 °F que le Tilt Pi
+  donne quand son étalonnage échoue sont ainsi écartés.
+- **Deux Tilt de la même couleur** : sans l'option « ID by MAC » du Tilt Pi,
+  celui-ci n'a qu'une entrée par couleur, remplie tour à tour par les deux.
+  L'intégration garde une empreinte de l'adresse MAC de chaque couleur : si
+  elle change, rien n'est envoyé pour cette couleur et le statut affiche
+  « MAC changée : deux Tilt de cette couleur, ou Tilt remplacé ». Les
+  valeurs reprennent quand la même nouvelle adresse est lue deux fois de
+  suite (un Tilt remplacé) ; deux Tilt qui alternent ne reprennent jamais.
+  Activez plutôt l'option **« ID by MAC »** du Tilt Pi : chaque Tilt a alors
+  son entrée (`RED:aa:bb:...`), lue comme la couleur rouge ; si deux entrées
+  ont la même couleur, aucune n'est envoyée (« deux Tilt de cette
+  couleur »).
 - Un appareil créé plus tard reçoit la dernière mesure, datée, si elle a
   moins de 15 minutes.
 
@@ -105,8 +127,8 @@ Un appareil Gladys par **couleur** de Tilt (« Tilt Red », « Tilt Blue »...) 
 
 L'adresse lue, l'heure de la dernière requête, la pause, et pour chaque
 couleur rencontrée la clé de la dernière mesure vue (son heure, ou une
-empreinte courte de l'entrée) : jamais l'adresse MAC d'un Tilt, jamais les
-valeurs. Le fichier est écrit au plus une fois par minute, sauf pour une
+empreinte courte de l'entrée) et une empreinte de 8 caractères de l'adresse
+MAC du Tilt (jamais l'adresse en clair), jamais les valeurs. Le fichier est écrit au plus une fois par minute, sauf pour une
 pause ou une nouvelle couleur.
 
 8 couleurs au plus ; 50 entrées au plus sont lues ; une réponse de plus de

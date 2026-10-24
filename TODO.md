@@ -10,21 +10,34 @@
 - [ ] Turn on "Private vulnerability reporting" (SECURITY.md points there).
 - [ ] Add the `gladys-assistant-integration` topic to publish in the store.
 
+## Facts of the Tilt Pi app (settled)
+
+Read in the official Node-RED flow of the app, `baronbrew/TILTpi`
+`flow.json`, commit e2aeef6 of 2025-08-08 (found by the review r1). That
+repository has no license: it was read for its facts only, nothing of it is
+copied, so nothing is added to `THIRD_PARTY_NOTICES.md`.
+
+- `Temp` is **always °F**: with a page in °C, the flow converts to °C to
+  calibrate, then back to °F (`Temp`); `tempunits` and `displayTemp`
+  follow the page. Hence no unit option, and a disagreement between `Temp`
+  and `displayTemp` drops the temperature.
+- `timeStamp` (`Date.now()` of the Raspberry Pi) is always set, and the
+  answer has a `Date` header (Node sets it).
+- `SG` is always a gravity (Plato and Brix go to `ferm`).
+- A Tilt silent more than `displayTimeout` (120 s by default) makes the flow
+  clear **every** slot; they fill again with the next frames. Without Tilt
+  the answer is `{}` (the `http in` payload), not `[]`.
+- Entries are kept per colour (25 slots at most): two Tilts of one colour
+  share a slot, the last heard wins. The "ID by MAC" option gives each its
+  own entry, `Color = "RED:aa:bb:cc:dd:ee:ff"`.
+- On a broken temperature calibration the flow falls back to `calTemp = 0`,
+  so `Temp: "0.0"` (-17.8 °C, out of the -10 to 60 °C bounds). The same
+  fallback with a page in °C gives 0 °C once converted back to 32 °F: that
+  case stays undetectable.
+
 ## To confirm on a real Tilt Pi
 
-- [ ] The unit of `Temp` in `/macid/all`: tilt-pi and Home Assistant read
-      it as °F; whether it follows the Celsius setting of the Tilt Pi page
-      (then the `temperature_unit` option is needed, or could be guessed
-      from a `tempunits` field).
-- [ ] Whether entries carry a `timeStamp` (ms) and whether the Tilt Pi
-      answer has a `Date` header (Node-RED adds one): without them,
-      readings are dated by change only.
-- [ ] Whether a Tilt no longer heard stays in `/macid/all` with its last
-      values (then it is reported "no recent reading", as designed) or
-      disappears.
 - [ ] Tilt HD / Tilt Pro: `SG` with 4 decimals (kept, rounded to 4).
-- [ ] What `SG` holds when the Tilt Pi shows Plato or Brix (out of range
-      here, so left out and reported).
 
 ## Decisions
 
@@ -48,37 +61,48 @@
   Bluetooth on its Raspberry Pi.
 - **Identity**: one device per Tilt colour (`ext:tilt-pi:tilt:<colour>`,
   the eight colours of tilt-pi `TiltColor`, lower case): the colour is how
-  a Tilt Pi tells Tilts apart; an unknown colour is skipped and counted.
-  The MAC address is never used for the id nor kept (only inside the digest
-  of an undated entry). Two entries of the same colour (two Tilts, or a
-  swapped Tilt still listed): neither is published (no merge without
-  proof), the status says so.
+  a Tilt Pi tells Tilts apart; `Color` is `RED` or, in the "ID by MAC"
+  mode, `RED:aa:bb:cc:dd:ee:ff` (the colour still the identity, external
+  ids unchanged). An unknown colour is skipped and counted. Two entries of
+  the same colour (ID by MAC with two Tilts of one colour): neither is
+  published. Without ID by MAC two Tilts share one entry: an 8-hex
+  fingerprint of the MAC (sha256, kept in memory and under `/data`, never
+  the address) is compared per colour (lesson 11: MAC against MAC); a
+  change holds the colour back ("MAC changed: two Tilts of this colour, or
+  a Tilt replaced") until the same new fingerprint is read twice in a row
+  (`MAC_CONFIRM`); an unreadable MAC changes nothing.
 - **Units**: the core has no density category nor unit
   (`DEVICE_FEATURE_UNITS_BY_CATEGORY`, checked in
   `~/code/Gladys/server/utils/constants.js`): the gravity is an `unknown`
   decimal sensor without unit, "SG" in its name only, bounds 0.95 to 1.2
   (the Tilt reads 0.990 to 1.120), 4 decimals. The temperature is
-  `temperature-sensor` / `probe` in °C (converted from °F unless the option
-  says the Tilt Pi sends °C), bounds -20 to 110 °C, 1 decimal. A value out
-  of bounds is left out, never clamped, and reported in the status.
+  `temperature-sensor` / `probe` in °C, always converted from the °F of
+  `Temp` (`(F - 32) × 5 / 9`, 1 decimal), bounds -10 to 60 °C (a wort;
+  the 0 °F fallback is left out). A value out of bounds is left out, never
+  clamped, and reported in the status; a `Temp` disagreeing with
+  `displayTemp` in `tempunits` (°C: > 0.3, °F: > 0.2) is not published and
+  reported.
 - **Silent Tilt never shown alive (lesson 28)**: a reading is new when its
   raw key changes (the `timeStamp` of the entry when it is a plausible
-  Unix time in ms, else a sha256 digest of the whole entry); the last key
-  of each colour is kept under `/data`, so a reading is published once,
-  also across a restart. A dated reading is published only when at most
-  15 minutes old on the Tilt Pi clock (`Date` header; a reading more than
-  5 minutes in the future, or older than the last one seen, is ignored).
-  An undated reading (no `timeStamp` or no `Date`) is published only when
-  an earlier key of the same colour is known and differs: the first sight
-  after an install is never published. The status lists every Tilt without
-  a new reading at the last read ("no recent reading").
-- **States**: current right after the read that brought them; a device
-  created later gets the last live reading dated (`created_at`, no scene)
-  up to 15 minutes after the read; never after a restart (the values are
-  not kept). `publishChangedStates` with a 30-minute heartbeat for an
-  unchanged value of a NEW reading. At most 8 colours × 2 features per
-  read (one read a minute at most): far under the 300 states a minute of
-  the core, so no budget queue.
+  Unix time in ms, else a sha256 digest of `Temp`, `SG`, `mac` and the raw
+  `timeStamp` only, never `rssi`, `clock`, `Timepoint`); the last key of
+  each colour is kept under `/data`, so a reading is published once, also
+  across a restart. With the `Date` header, the age alone decides, on the
+  Tilt Pi clock: -5 to 15 minutes (a Raspberry Pi clock set back loses
+  nothing). Without it, an older `timeStamp` than the last one is ignored,
+  and a reading is published only when an earlier key of the same colour
+  is known and differs: the first sight after an install is never
+  published. The status lists every Tilt without a new reading at the
+  last read ("no recent reading"). `{}` is no Tilt: the Tilt Pi stays
+  connected, the known Tilts are "no recent reading".
+- **States**: a new reading at most 3 minutes old (`CURRENT`) is current;
+  3 to 15 minutes, dated (`created_at` = its time, no scene; lot 12 rule:
+  never a stale value as new). A device created later gets the last live
+  reading dated while it is at most 15 minutes old; never after a restart
+  (the values are not kept). `publishChangedStates` with a 30-minute
+  heartbeat for an unchanged value of a NEW reading. At most 8 colours × 2
+  features per read (one read a minute at most): far under the 300 states
+  a minute of the core, so no budget queue.
 - **Pace (lessons 11, 12; lesson 5 of lot 14)**: the instant of a request is
   written to `/data` (wall clock) before it leaves, a read waits until a
   write is allowed (60 s after the previous one). In memory the interval

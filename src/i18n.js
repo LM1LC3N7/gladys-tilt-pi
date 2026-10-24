@@ -18,6 +18,10 @@ export const REASONS = {
   invalid: { en: 'not a Tilt Pi answer', fr: "réponse qui n'est pas celle d'un Tilt Pi" },
   stale: { en: 'no recent reading', fr: 'pas de mesure récente' },
   twice: { en: 'two Tilts of this colour', fr: 'deux Tilt de cette couleur' },
+  mac: {
+    en: 'MAC changed: two Tilts of this colour, or a Tilt replaced',
+    fr: 'MAC changée : deux Tilt de cette couleur, ou Tilt remplacé',
+  },
 };
 
 export const reason = (kind) => REASONS[kind] ?? REASONS.failed;
@@ -38,6 +42,10 @@ export const T = {
   outOfRange: (names) => ({
     en: `Value out of range, not published: ${names}.`,
     fr: `Valeur hors bornes, non publiée : ${names}.`,
+  }),
+  incoherent: (names) => ({
+    en: `Temperature not published, it disagrees with the Tilt Pi display: ${names}.`,
+    fr: `Température non publiée, elle ne correspond pas à l'affichage du Tilt Pi : ${names}.`,
   }),
   nextRead: (at) => ({
     en: `next read possible at ${utcTime(at)}`,

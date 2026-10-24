@@ -53,9 +53,11 @@ One Gladys device per Tilt **colour** ("Tilt Red", "Tilt Blue"...):
   your router. A new address is read at once (one request a minute at
   most).
 - **Read interval**: 5 minutes by default, 1 to 60.
-- **Temperature unit sent by the Tilt Pi**: Fahrenheit by default, as the
-  `tilt-pi` library reads it. If the temperature looks wrong in Gladys
-  (about 20 °C shown as -7 °C), choose Celsius. Gladys always stores °C.
+- No unit setting: the Tilt Pi API always gives the temperature in °F,
+  even when its page shows °C (that is what the official flow of the app
+  does). The integration converts it to °C, and Gladys shows it in the unit
+  of your profile. If the API temperature disagrees with what the Tilt Pi
+  page shows, it is not sent and the status says so.
 
 ## How often the Tilt Pi is read
 
@@ -72,25 +74,44 @@ One Gladys device per Tilt **colour** ("Tilt Red", "Tilt Blue"...):
 - When the Tilt Pi answers **429 or a 5xx error**, it is left alone for the
   `Retry-After` it gives, else 5 minutes, then 10, 20...; always between 1
   minute and 6 hours, also across a restart.
-- No answer, a page that is not a Tilt Pi (404, an answer that is not a
-  list) or a refused access: tried again at the next interval only.
+- **No Tilt heard** (between two brews, or right after the Tilt Pi cleared
+  its slots because a Tilt was silent more than 2 minutes) is normal: the
+  Tilt Pi answers `{}`, the status stays connected and the known Tilts show
+  "no recent reading".
+- No answer, a page that is not a Tilt Pi (404, an answer that is neither a
+  list nor `{}`) or a refused access: tried again at the next interval only.
 
 ## Which values reach Gladys
 
 - Each reading is handed to Gladys **once**. A reading is told apart by its
-  time (`timeStamp`) when the Tilt Pi gives one, else by the content of its
-  entry (a live Tilt changes at least its signal).
+  time (`timeStamp`, always given by the Tilt Pi), else by its temperature,
+  gravity, MAC address and raw `timeStamp` (never by the signal nor the
+  clock fields the Tilt Pi rewrites without a new reading).
+- A reading at most 3 minutes old is sent as the current value; from 3 to
+  15 minutes, it is sent **dated** (Gladys stores it at its time and no
+  scene fires).
 - A **silent** Tilt (out of range, flat battery, out of the fermenter) is
   **never shown alive**: when its reading no longer changes, nothing is
   sent, and the status shows "no recent reading". A reading dated more than
   15 minutes ago, measured with the Tilt Pi clock (the `Date` of its
-  answer), is never sent. Without a time, the first reading seen of a Tilt
+  answer; the age alone decides, so a Raspberry Pi set back to an old time
+  loses no reading), is never sent. Without a time, the first reading seen of a Tilt
   is not sent: only a reading that changed since the previous read proves
   the Tilt alive.
 - A value out of range (gravity outside 0.950 to 1.200, temperature outside
-  -20 to 110 °C) is never sent nor clamped; the status reports it.
-- Two Tilts of the same colour on the Tilt Pi: neither is sent (there is no
-  telling which is which), the status reports it.
+  -10 to 60 °C, what a wort can reach) is never sent nor clamped; the status
+  reports it. The 0 °F the Tilt Pi gives when its calibration fails is thus
+  left out.
+- **Two Tilts of the same colour**: without the "ID by MAC" option of the
+  Tilt Pi, it has one entry per colour, filled in turn by both. The
+  integration keeps a fingerprint of the MAC address of each colour: when
+  it changes, nothing is sent for that colour and the status shows "MAC
+  changed: two Tilts of this colour, or a Tilt replaced". The values come
+  back when the same new address is read twice in a row (a replaced Tilt);
+  two Tilts taking turns never come back. Rather turn on the **"ID by MAC"**
+  option of the Tilt Pi: each Tilt then has its own entry
+  (`RED:aa:bb:...`), read as the red colour; if two entries have the same
+  colour, neither is sent ("two Tilts of this colour").
 - A device created later gets the last reading, dated, if it is less than
   15 minutes old.
 
@@ -98,7 +119,8 @@ One Gladys device per Tilt **colour** ("Tilt Red", "Tilt Blue"...):
 
 The address read, the instant of the last request, the pause, and for each
 colour met the key of the last reading seen (its time, or a short digest of
-the entry): never the MAC address of a Tilt, never the values. The file is
+the entry) and an 8-character fingerprint of the MAC address of the Tilt
+(never the address in clear), never the values. The file is
 written at most once per minute, but for a pause or a new colour.
 
 8 colours at most; 50 entries at most are read; an answer larger than 256

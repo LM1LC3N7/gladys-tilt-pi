@@ -10,7 +10,8 @@
 //   `unknown` sensor without unit, "SG" in its name only. No unit invented.
 // - `temperature`: the temperature of the wort, in °C (a unit the core lists
 //   for `temperature-sensor`), as a `probe`: kept out of the room temperature
-//   average of Gladys.
+//   average of Gladys. The Tilt Pi always gives `Temp` in °F (its flow
+//   converts back to °F after a Celsius calibration): converted here, once.
 //
 // The feature key is a name of this integration, never a Tilt Pi field: it
 // is part of the external id, so it never changes.
@@ -29,7 +30,7 @@ const round = (value, digits) => Math.round(value * 10 ** digits) / 10 ** digits
 export const fahrenheitToCelsius = (f) => ((f - 32) * 5) / 9;
 
 /**
- * [feature key, feature definition, read(tilt, celsius)]: the order of the
+ * [feature key, feature definition, read(tilt)]: the order of the
  * features in Gladys. A value out of [min, max] is left out, never clamped
  * into a false reading.
  */
@@ -53,25 +54,31 @@ export const TABLE = [
       category: CAT.TEMPERATURE_SENSOR,
       type: TYPES.TEMPERATURE_SENSOR.PROBE,
       unit: UNITS.CELSIUS,
-      min: -20,
-      max: 110,
+      // What a wort can be. Narrow on purpose: the 0 °F the Tilt Pi falls back
+      // to when its calibration fails (-17.8 °C) is left out.
+      min: -10,
+      max: 60,
     },
-    (tilt, celsius) =>
-      tilt.temp === null ? null : round(celsius ? tilt.temp : fahrenheitToCelsius(tilt.temp), 1),
+    (tilt) => (tilt.temp === null ? null : round(fahrenheitToCelsius(tilt.temp), 1)),
   ],
 ];
 
 const KEYS = new Set(TABLE.map(([key]) => key));
 
 /**
- * The usable values of a Tilt: `{ values, outOfRange: [keys] }`. `celsius`:
- * the Tilt Pi sends Celsius (option), else Fahrenheit (tilt-pi).
+ * The usable values of a Tilt: `{ values, outOfRange: [keys], incoherent }`.
+ * A temperature that disagrees with what the Tilt Pi page shows is never
+ * published (`incoherent`): a future flow changing the meaning of `Temp`
+ * never gives a false value.
  */
-export function valuesOf(tilt, celsius) {
+export function valuesOf(tilt) {
   const values = {};
   const outOfRange = [];
   for (const [key, def, read] of TABLE) {
-    const value = read(tilt, celsius);
+    if (key === 'temperature' && tilt.incoherent) {
+      continue;
+    }
+    const value = read(tilt);
     if (value === null || !Number.isFinite(value)) {
       continue;
     }
@@ -81,7 +88,7 @@ export function valuesOf(tilt, celsius) {
       outOfRange.push(key);
     }
   }
-  return { values, outOfRange };
+  return { values, outOfRange, incoherent: Boolean(tilt.incoherent) };
 }
 
 // --- Gladys devices and states ------------------------------------------------------

@@ -9,7 +9,6 @@ import { DEFAULT_PORT } from './constants.js';
 // (test/manifest.test.js checks it).
 export const DEFAULT_CONFIG = {
   poll_interval: 5,
-  temperature_unit: 'fahrenheit',
 };
 
 const number = (value, fallback, min, max) => {
@@ -73,13 +72,12 @@ export function parseAddress(raw) {
   return { host, port, origin: `http://${host}:${port}` };
 }
 
-/** The configuration: the Tilt Pi address, the interval, the temperature unit it sends. */
+/** The configuration: the Tilt Pi address and the interval. */
 export function normalizeConfig(raw = {}) {
   const address = parseAddress(raw.address);
   return {
     address: address && !address.invalid ? address : null,
     invalid: Boolean(address?.invalid),
     pollMinutes: number(raw.poll_interval, DEFAULT_CONFIG.poll_interval, 1, 60),
-    celsius: raw.temperature_unit === 'celsius',
   };
 }

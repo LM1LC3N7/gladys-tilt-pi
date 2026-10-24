@@ -26,9 +26,11 @@ Gladys ⇄ SDK ⇄ src/app.js (TiltPiApp)   what is due, pause, devices, states,
   request is persisted before it leaves, written at most once per minute;
   in memory the interval and the pauses run on a monotonic clock).
 - **Readings**: told apart by the raw `timeStamp` of the Tilt Pi (else a
-  digest of the entry), handed to Gladys once; dated ones only when at most
-  15 minutes old on the Tilt Pi clock (`Date` header); undated ones only
-  once a change proves the Tilt alive. A silent Tilt sends nothing.
+  digest of Temp, SG, mac and timeStamp), handed to Gladys once; with the
+  `Date` header, on their age alone: current up to 3 minutes, dated up to
+  15; undated ones only once a change proves the Tilt alive. A silent Tilt
+  sends nothing. `Temp` is always °F (the Tilt Pi flow). A changed MAC
+  fingerprint on a colour holds it back until read twice in a row.
 - **429/5xx** → `Retry-After`, else 5 minutes doubling, between 1 minute
   and 6 hours, persisted.
 - **Devices**: `tilt:<colour>` (the eight Tilt colours), features

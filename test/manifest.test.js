@@ -179,11 +179,7 @@ test('the configuration matches the code', () => {
   assert.equal(fields.address.type, 'string');
   assert.equal(fields.poll_interval.min, 1);
   assert.equal(fields.poll_interval.max, 60);
-  assert.deepEqual(
-    fields.temperature_unit.options.map((o) => o.value),
-    ['fahrenheit', 'celsius'],
-  );
-  assert.equal(normalizeConfig({ temperature_unit: 'celsius' }).celsius, true);
+  assert.equal(fields.temperature_unit, undefined, 'Temp is always °F: no unit option');
   assert.equal(normalizeConfig({ poll_interval: 'x' }).pollMinutes, 5);
   assert.equal(normalizeConfig({ poll_interval: 600 }).pollMinutes, 60);
 });

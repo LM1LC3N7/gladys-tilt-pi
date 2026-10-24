@@ -14,7 +14,9 @@ import {
   BUSY_BASE,
   BUSY_MAX,
   BUSY_MIN,
+  CURRENT,
   FUTURE_TOLERANCE,
+  MAC_CONFIRM,
   HEARTBEAT,
   STALE,
   TEST_DEADLINE,
@@ -41,10 +43,17 @@ const asSourceError = (err) => (err instanceof SourceError ? err : new SourceErr
 /** The raw `timeStamp` behind a reading key (`t<ms>`), or null. */
 const stampOfKey = (key) => (/^t\d+$/.test(key) ? Number(key.slice(1)) : null);
 
-const newTilt = (color, key = '') => ({
+const newTilt = (color, { key = '', mac = '', candidate = '', seen = 0 } = {}) => ({
   color,
   /** The key of the last reading seen (kept under /data). */
   key,
+  /** The 8-hex fingerprint of the MAC address whose values count (kept under /data). */
+  mac,
+  /** A different fingerprint being confirmed, and how many reads in a row showed it. */
+  candidate,
+  seen,
+  /** Whether the temperature disagreed with the Tilt Pi display at the last read. */
+  incoherent: false,
   /** Whether the last read brought a new, recent reading of this Tilt. */
   live: false,
   /** Whether the last read listed this colour twice. */
@@ -121,7 +130,7 @@ export class TiltPiApp {
       this.error = 'busy';
     }
     for (const tilt of saved.tilts) {
-      this.tilts.set(tilt.color, newTilt(tilt.color, tilt.key));
+      this.tilts.set(tilt.color, newTilt(tilt.color, tilt));
     }
   }
 
@@ -280,14 +289,52 @@ export class TiltPiApp {
   }
 
   /**
+   * The MAC fingerprint of a reading, against the one of its colour.
+   * Returns whether its values may count. A new fingerprint is held back
+   * until it is read MAC_CONFIRM times in a row (a replaced Tilt comes back;
+   * two Tilts of one colour taking turns never do); an unreadable one
+   * changes nothing.
+   */
+  checkMac(tilt, print) {
+    if (print === null) {
+      return !tilt.candidate;
+    }
+    if (!tilt.mac) {
+      tilt.mac = print;
+      return true;
+    }
+    if (!tilt.candidate && print === tilt.mac) {
+      return true;
+    }
+    if (print === tilt.candidate) {
+      tilt.seen += 1;
+    } else {
+      tilt.candidate = print;
+      tilt.seen = 1;
+    }
+    if (tilt.seen >= MAC_CONFIRM) {
+      tilt.mac = print;
+      tilt.candidate = '';
+      tilt.seen = 0;
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * The Tilts of an answer. A reading is new when its key differs from the
-   * last one seen (the raw `timeStamp`, else a digest of the entry). It is
-   * published only when it is new AND recent: dated by the Tilt Pi, at most
-   * 15 minutes old on the Tilt Pi clock (the `Date` of its answer); undated
-   * (no `timeStamp` or no `Date`), only once an earlier reading of the same
-   * Tilt is known, so a Tilt left silent with its last values on the Tilt
-   * Pi never looks alive, not even at the first read. Returns whether a
-   * colour was met for the first time.
+   * last one seen (the raw `timeStamp`, else a digest of Temp, SG, mac and
+   * timeStamp). It is published only when it is new AND recent:
+   *
+   * - with the `Date` of the answer (always there with the Tilt Pi), on its
+   *   age alone, on the Tilt Pi clock: -5 min to 15 min (so a Tilt Pi clock
+   *   set back loses nothing); current up to 3 minutes, dated beyond;
+   * - without it, only once an earlier reading of the same Tilt is known
+   *   and not newer, so a Tilt left silent with its last values on the Tilt
+   *   Pi never looks alive, not even at the first read.
+   *
+   * A reading whose MAC fingerprint changed is held back (checkMac). Returns
+   * whether a colour was met for the first time.
    */
   apply({ tilts, unknown, twice, date }) {
     const readMono = this.mono();
@@ -297,6 +344,7 @@ export class TiltPiApp {
       tilt.live = false;
       tilt.twice = twice.has(tilt.color);
       tilt.outOfRange = [];
+      tilt.incoherent = false;
     }
     for (const color of twice) {
       if (!this.tilts.has(color)) {
@@ -312,27 +360,33 @@ export class TiltPiApp {
         added = true;
       }
       const age = reading.stamp !== null && date !== null ? date - reading.stamp : null;
-      const previous = stampOfKey(tilt.key);
-      if (
-        (age !== null && age < -FUTURE_TOLERANCE) ||
-        (reading.stamp !== null && previous !== null && reading.stamp < previous)
-      ) {
-        // From the future, or older than a reading already seen: ignored.
+      if (age !== null && age < -FUTURE_TOLERANCE) {
         continue;
+      }
+      if (age === null) {
+        const previous = stampOfKey(tilt.key);
+        if (reading.stamp !== null && previous !== null && reading.stamp < previous) {
+          // Older than a reading already seen, and no clock to tell: ignored.
+          continue;
+        }
       }
       const isNew = reading.key !== tilt.key;
       const proven = age !== null ? age <= STALE : tilt.key !== '';
       tilt.key = reading.key;
-      const { values, outOfRange } = valuesOf(reading, this.config.celsius);
+      const macOk = this.checkMac(tilt, reading.mac);
+      const { values, outOfRange, incoherent } = valuesOf(reading);
       tilt.outOfRange = outOfRange;
-      tilt.live = isNew && proven && Object.keys(values).length > 0;
+      tilt.incoherent = incoherent;
+      tilt.live = macOk && isNew && proven && Object.keys(values).length > 0;
       if (tilt.live) {
         tilt.sample = {
           values,
           key: reading.key,
           readMono,
+          age: Math.max(0, age ?? 0),
           at: readAt - Math.max(0, age ?? 0),
-          current: true,
+          current: (age ?? 0) <= CURRENT,
+          first: true,
         };
       }
     }
@@ -372,9 +426,18 @@ export class TiltPiApp {
     this.store.update({ streak, pausedUntil: this.now() + length });
   }
 
-  /** The Tilts as kept under /data: colour and key of the last reading, nothing else. */
+  /**
+   * The Tilts as kept under /data: colour, key of the last reading and MAC
+   * fingerprints (8 hex, never the address), nothing else.
+   */
   serialize() {
-    return [...this.tilts.values()].map((t) => ({ color: t.color, key: t.key }));
+    return [...this.tilts.values()].map((t) => ({
+      color: t.color,
+      key: t.key,
+      mac: t.mac,
+      candidate: t.candidate,
+      seen: t.seen,
+    }));
   }
 
   // --- Gladys devices and states --------------------------------------------------
@@ -406,8 +469,9 @@ export class TiltPiApp {
   /**
    * The values of the created features, from each Tilt's last live reading.
    * A reading is handed to Gladys once per feature: as current right after
-   * the read that brought it, dated (`created_at`, no scene fires) to a
-   * feature created later, up to 15 minutes after the read; never after a
+   * the read that brought it if at most 3 minutes old, else dated
+   * (`created_at`, no scene fires), also to a feature created later, while
+   * at most 15 minutes old; never after a
    * restart (the readings are not kept). A silent Tilt sends nothing.
    */
   async publishStates() {
@@ -424,9 +488,9 @@ export class TiltPiApp {
       if (!sample) {
         continue;
       }
-      const current = sample.current;
-      sample.current = false;
-      if (mono - sample.readMono > STALE) {
+      const current = sample.first && sample.current;
+      sample.first = false;
+      if (mono - sample.readMono + sample.age > STALE) {
         continue;
       }
       for (const state of statesOf(this.gladys, tilt.color, sample.values)) {
@@ -479,6 +543,8 @@ export class TiltPiApp {
     for (const tilt of this.sorted()) {
       if (tilt.twice) {
         list.push({ name: `Tilt ${colorName(tilt.color)}`, kind: 'twice' });
+      } else if (tilt.candidate) {
+        list.push({ name: `Tilt ${colorName(tilt.color)}`, kind: 'mac' });
       } else if (!tilt.live) {
         list.push({ name: `Tilt ${colorName(tilt.color)}`, kind: 'stale' });
       }
@@ -496,6 +562,12 @@ export class TiltPiApp {
       .map((t) => `Tilt ${colorName(t.color)} (${t.outOfRange.join(', ')})`);
     if (out.length > 0) {
       notes.push(T.outOfRange(out.join(', ')));
+    }
+    const incoherent = this.sorted()
+      .filter((t) => t.incoherent)
+      .map((t) => `Tilt ${colorName(t.color)}`);
+    if (incoherent.length > 0) {
+      notes.push(T.incoherent(incoherent.join(', ')));
     }
     if (notes.length === 0) {
       return text;
@@ -540,6 +612,9 @@ export class TiltPiApp {
     const name = `Tilt ${colorName(tilt.color)}`;
     if (tilt.twice) {
       return `- ${name}${colon} ${reason('twice')[lang]}`;
+    }
+    if (tilt.candidate) {
+      return `- ${name}${colon} ${reason('mac')[lang]}`;
     }
     if (!tilt.live || !tilt.sample) {
       return `- ${name}${colon} ${reason('stale')[lang]}`;

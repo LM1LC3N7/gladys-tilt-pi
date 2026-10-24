@@ -133,22 +133,115 @@ test('one device per colour, gravity and temperature in °C, published at once',
   assert.match(gladys.fake.connectionStatus.message.en, /2 Tilt\(s\) on the Tilt Pi/);
 });
 
-test('a Celsius Tilt Pi is not converted (option); out of range is left out', async () => {
-  const config = { ...CONFIG, temperature_unit: 'celsius' };
-  const { gladys, tilt, app } = await setup({ config, start: false });
+test('Temp is always °F, also when the Tilt Pi page shows °C; out of range is left out', async () => {
+  const { gladys, tilt, app } = await setup({ start: false });
   tilt.body = (c) => [
-    entry('red', { temp: 120, stamp: c.wall }),
-    entry('blue', { temp: 19.5, sg: 0.5, stamp: c.wall }),
+    // The real entry of a Tilt Pi displaying °C: Temp in °F, displayTemp in °C.
+    { ...entry('red', { temp: '68.0', stamp: c.wall }), tempunits: '°C', displayTemp: '20.0' },
+    // 0 °F: the fallback of a broken calibration (-17.8 °C), and a gravity of 0.5.
+    entry('blue', { temp: '0.0', sg: 0.5, stamp: c.wall }),
+    // Temp disagreeing with the display: never published.
+    { ...entry('green', { temp: 68, stamp: c.wall }), tempunits: '°C', displayTemp: '68.0' },
   ];
-  await app.start(config);
-  assert.equal(gladys.fake.lastState(`${RED}:temperature`), undefined, 'out of range: dropped');
+  await app.start(CONFIG);
+  assert.equal(gladys.fake.lastState(`${RED}:temperature`), 20);
   assert.equal(gladys.fake.lastState(`${RED}:gravity`), 1.05);
-  assert.equal(gladys.fake.lastState(`${BLUE}:temperature`), 19.5);
+  assert.ok(!gladys.fake.states.some((st) => st.state === 68), 'never 68 °C');
+  assert.equal(gladys.fake.lastState(`${BLUE}:temperature`), undefined);
   assert.equal(gladys.fake.lastState(`${BLUE}:gravity`), undefined);
+  const message = gladys.fake.connectionStatus.message.en;
+  assert.match(message, /out of range, not published: Tilt Blue \(gravity, temperature\)/);
+  assert.match(message, /disagrees with the Tilt Pi display: Tilt Green/);
+});
+
+test('{} (no Tilt heard) is a working Tilt Pi with no Tilt, not an error', async () => {
+  const { app, gladys, clock, tilt } = await setup();
+  tilt.body = () => ({});
+  clock.advance(5 * MIN);
+  await app.tick();
+  assert.equal(gladys.fake.connectionStatus.connected, true);
   assert.match(
     gladys.fake.connectionStatus.message.en,
-    /out of range, not published: Tilt Blue \(gravity\), Tilt Red \(temperature\)/,
+    /Without value: Tilt Blue \(no recent reading\), Tilt Red \(no recent reading\)/,
   );
+  tilt.body = () => ({ a: 1 });
+  clock.advance(5 * MIN);
+  await app.tick();
+  assert.equal(gladys.fake.connectionStatus.connected, false);
+  assert.match(gladys.fake.connectionStatus.message.en, /not a Tilt Pi answer/);
+});
+
+test('a changed MAC holds the colour back until read twice in a row', async () => {
+  const { app, gladys, clock, tilt } = await setup({ devices: devicesFor('red') });
+  const A = 'AA:BB:CC:DD:EE:01';
+  const B = 'AA:BB:CC:DD:EE:02';
+  const read = async (mac, sg) => {
+    tilt.body = (c) => [entry('red', { mac, sg, stamp: c.wall - 1_000 })];
+    clock.advance(5 * MIN);
+    await app.tick();
+  };
+  assert.equal(gladys.fake.lastState(`${RED}:gravity`), 1.05);
+  // Two Tilts of one colour taking turns: nothing after the first change.
+  await read(B, 1.008);
+  await read(A, 1.052);
+  await read(B, 1.008);
+  assert.deepEqual(
+    statesOf(gladys, `${RED}:gravity`).map((st) => st.state),
+    [1.05],
+  );
+  assert.match(gladys.fake.connectionStatus.message.en, /Tilt Red \(MAC changed/);
+  // An unreadable MAC changes nothing (still held).
+  await read('??', 1.007);
+  assert.equal(statesOf(gladys, `${RED}:gravity`).length, 1);
+  // A replaced Tilt: the same new MAC twice in a row, then it counts again.
+  await read(B, 1.006);
+  assert.deepEqual(
+    statesOf(gladys, `${RED}:gravity`).map((st) => st.state),
+    [1.05, 1.006],
+  );
+  assert.doesNotMatch(gladys.fake.connectionStatus.message.en, /MAC changed/);
+  assert.doesNotMatch(JSON.stringify(app.store.get()), /AA:BB/i, 'only fingerprints in /data');
+});
+
+test('"ID by MAC" mode: RED:mac is the red Tilt, same external ids', async () => {
+  const { gladys, tilt, app } = await setup({ start: false });
+  tilt.body = (c) => [
+    { ...entry('red', { stamp: c.wall }), Color: 'RED:aa:bb:cc:dd:ee:01' },
+    { ...entry('blue', { stamp: c.wall }), Color: 'BLUE:aa:bb:cc:dd:ee:02' },
+    { ...entry('blue', { stamp: c.wall }), Color: 'BLUE:aa:bb:cc:dd:ee:03' },
+  ];
+  await app.start(CONFIG);
+  assert.equal(gladys.fake.lastState(`${RED}:gravity`), 1.05);
+  assert.equal(gladys.fake.lastState(`${BLUE}:gravity`), undefined);
+  assert.match(gladys.fake.connectionStatus.message.en, /Tilt Blue \(two Tilts of this colour\)/);
+});
+
+test('a Tilt Pi clock set back 3 hours loses nothing: the age alone decides', async () => {
+  const { app, gladys, clock, tilt } = await setup({ devices: devicesFor('red') });
+  const back = 3 * 60 * MIN;
+  tilt.date = false;
+  tilt.headers = {};
+  tilt.body = (c) => [entry('red', { sg: 1.04, stamp: c.wall - back - 2_000 })];
+  const piDate = () => new Date(clock.wall - back).toUTCString();
+  fake.restore();
+  fake = installFetch([[/macid/, () => json(tilt.body(clock), 200, { date: piDate() })]]);
+  clock.advance(5 * MIN);
+  await app.tick();
+  assert.equal(gladys.fake.lastState(`${RED}:gravity`), 1.04);
+  tilt.body = (c) => [entry('red', { sg: 1.03, stamp: c.wall - back - 2_000 })];
+  clock.advance(5 * MIN);
+  await app.tick();
+  assert.equal(gladys.fake.lastState(`${RED}:gravity`), 1.03);
+});
+
+test('current up to 3 minutes old, dated beyond (up to 15 minutes)', async () => {
+  const { app, gladys, clock, tilt } = await setup({ devices: devicesFor('red') });
+  tilt.body = (c) => [entry('red', { sg: 1.03, stamp: c.wall - 4 * MIN })];
+  clock.advance(5 * MIN);
+  await app.tick();
+  const last = statesOf(gladys, `${RED}:gravity`).at(-1);
+  assert.equal(last.state, 1.03);
+  assert.equal(last.created_at, new Date(clock.wall - 4 * MIN).toISOString());
 });
 
 test('never faster than the interval: test button, reconnection, same config, restart', async () => {
@@ -264,20 +357,22 @@ test('the age is taken on the Tilt Pi clock, not on the Gladys clock', async () 
   assert.equal(gladys.fake.lastState(`${RED}:gravity`), 1.05);
 });
 
-test('undated entries: the first sight is never published, a change is', async () => {
+test('undated entries: the first sight is never published, a new reading is', async () => {
   const { app, gladys, clock, tilt } = await setup({ start: false });
   tilt.date = false;
+  let sg = 1.05;
   let rssi = -70;
-  tilt.body = () => [entry('red', { rssi })];
+  tilt.body = () => [entry('red', { rssi, sg })];
   await app.start(CONFIG);
   assert.equal(statesOf(gladys, `${RED}:gravity`).length, 0, 'not proven alive yet');
+  rssi = -75;
   clock.advance(5 * MIN);
   await app.tick();
-  assert.equal(statesOf(gladys, `${RED}:gravity`).length, 0, 'unchanged: silent');
-  rssi = -71;
+  assert.equal(statesOf(gladys, `${RED}:gravity`).length, 0, 'only the signal moved: silent');
+  sg = 1.049;
   clock.advance(5 * MIN);
   await app.tick();
-  assert.equal(gladys.fake.lastState(`${RED}:gravity`), 1.05);
+  assert.equal(gladys.fake.lastState(`${RED}:gravity`), 1.049);
 });
 
 test('a restart never publishes a reading already published (keys flushed on stop)', async () => {

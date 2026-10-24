@@ -52,9 +52,11 @@ test/                             node --test, against the SDK's fake Gladys (in
 - **Read only.** Only `GET /macid/all` on the Tilt Pi; nothing that writes.
   **No Bluetooth**: the Tilt Pi listens to the Tilts on its Raspberry Pi.
 - **Readings are told apart by their raw key** (`timeStamp` of the Tilt Pi,
-  else a digest of the entry; kept under `/data`) and handed to Gladys
-  once; a dated one only when at most 15 minutes old on the Tilt Pi clock
-  (`Date` header), an undated one only once a change proves the Tilt alive.
+  else a digest of Temp, SG, mac and timeStamp; kept under `/data`) and
+  handed to Gladys once; with a `Date` header on the age alone (current up
+  to 3 minutes, dated up to 15), an undated one only once a change proves
+  the Tilt alive. `Temp` is always °F. A changed MAC fingerprint (8 hex)
+  holds a colour back until read twice in a row.
   A silent Tilt sends nothing and is never shown alive.
 - **Pace.** Never read before the last request + the interval (test button,
   reconnection, saved configuration, Discovery, restart); the instant of a
@@ -69,7 +71,7 @@ test/                             node --test, against the SDK's fake Gladys (in
   has no density category, so the gravity is `unknown` without unit. Never
   drop a feature of a created device from the Discovery list.
 - **The container rootfs is read-only.** Write only under `/data`, the one
-  writable volume. Never a MAC address there.
+  writable volume. Never a MAC address there (an 8-hex fingerprint only).
 - **Versions belong to the Release workflow** (Actions → Release). Never edit
   `version` in `package.json` or in the manifest, nor the `docker_image` tag,
   by hand (the first version, 0.1.0, was set by hand once, see TODO.md).
