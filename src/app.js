@@ -56,6 +56,7 @@ const newTilt = (
     prevAt = 0,
     lock = '',
     lockSince = 0,
+    lockReads = 0,
   } = {},
 ) => ({
   color,
@@ -73,6 +74,8 @@ const newTilt = (
   /** Two Tilts of one colour: the fingerprint read alone since `lockSince`, or ''. */
   lock,
   lockSince,
+  /** Reads of `lock` alone since `lockSince` (kept under /data). */
+  lockReads,
   /** Whether the temperature disagreed with the Tilt Pi display at the last read. */
   incoherent: false,
   /** Whether the last read brought a new, recent reading of this Tilt. */
@@ -319,25 +322,33 @@ export class TiltPiApp {
    * - A replaced fingerprint coming back within MAC_LOCK (A -> B -> A, or
    *   A -> B held then A) locks the colour: two Tilts of one colour taking
    *   turns, at random, in one slot. Nothing is published until a single
-   *   fingerprint has been read alone for MAC_LOCK; a saved configuration
+   *   fingerprint has been read alone for MAC_LOCK, in at least
+   *   lockReadsNeeded() reads; a saved configuration
    *   or a restart never lifts the lock.
    * - An unreadable fingerprint changes nothing.
    */
+  /** Reads of the lock fingerprint alone needed to lift it: half a day of reads, 12 at least. */
+  lockReadsNeeded() {
+    return Math.max(12, Math.ceil(MAC_LOCK / this.intervalMs() / 2));
+  }
+
   checkMac(tilt, print, wall) {
     if (print === null) {
       return !tilt.candidate && !tilt.lock;
     }
     if (tilt.lock) {
       if (print !== tilt.lock || tilt.lockSince > wall) {
-        tilt.lock = print;
-        tilt.lockSince = wall;
+        Object.assign(tilt, { lock: print, lockSince: wall, lockReads: 1 });
         return false;
       }
-      if (wall - tilt.lockSince < MAC_LOCK) {
+      tilt.lockReads += 1;
+      // 24 wall-clock hours AND enough reads of it alone in them: a clock
+      // jumping forward, or a day without any read, never lifts the lock.
+      if (wall - tilt.lockSince < MAC_LOCK || tilt.lockReads < this.lockReadsNeeded()) {
         return false;
       }
       Object.assign(tilt, { mac: print, macAt: wall, candidate: '', seen: 0 });
-      Object.assign(tilt, { prev: '', prevAt: 0, lock: '', lockSince: 0 });
+      Object.assign(tilt, { prev: '', prevAt: 0, lock: '', lockSince: 0, lockReads: 0 });
       return true;
     }
     if (!tilt.mac) {
@@ -345,12 +356,13 @@ export class TiltPiApp {
       tilt.macAt = wall;
       return true;
     }
-    const recent = (at) => wall - at < MAC_LOCK && at <= wall;
+    // An instant in the future (a clock set back) counts as recent: it locks.
+    const recent = (at) => wall - at < MAC_LOCK;
     const back =
       (tilt.candidate && print === tilt.mac) ||
       (tilt.prev && print === tilt.prev && recent(tilt.prevAt));
     if (back) {
-      Object.assign(tilt, { candidate: '', seen: 0, lock: print, lockSince: wall });
+      Object.assign(tilt, { candidate: '', seen: 0, lock: print, lockSince: wall, lockReads: 1 });
       return false;
     }
     if (!tilt.candidate && print === tilt.mac) {
@@ -492,6 +504,7 @@ export class TiltPiApp {
       prevAt: t.prevAt,
       lock: t.lock,
       lockSince: t.lockSince,
+      lockReads: t.lockReads,
     }));
   }
 

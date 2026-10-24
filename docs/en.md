@@ -111,13 +111,14 @@ One Gladys device per Tilt **colour** ("Tilt Red", "Tilt Blue"...):
   twice in a row. If an address already replaced comes back within 24
   hours (A, then B, then A again: two Tilts taking turns), the colour is
   **locked**: nothing is sent for it, and the status shows "two Tilts of
-  this colour (MAC addresses taking turns): turn on "ID by MAC" on the Tilt
-  Pi", until a single address has been read alone for 24 hours. The lock is
-  kept under `/data`: neither a restart nor a saved configuration lifts it.
-  Rather turn on the **"ID by MAC"**
-  option of the Tilt Pi: each Tilt then has its own entry
-  (`RED:aa:bb:...`), read as the red colour; if two entries have the same
-  colour, neither is sent ("two Tilts of this colour").
+  this colour (MAC addresses taking turns): only one Tilt per colour is
+  supported", until a single address has been read alone for 24 hours, in
+  at least 12 reads (half the reads of a day at the chosen interval). The
+  lock is kept under `/data`: neither a restart nor a saved configuration
+  lifts it. **Only one Tilt per colour is supported.** The "ID by MAC"
+  option of the Tilt Pi gives each Tilt its own entry (`RED:aa:bb:...`),
+  read as the red colour; but if two entries have the same colour, neither
+  is sent either ("two Tilts of this colour").
 - A device created later gets the last reading, dated, if it is less than
   15 minutes old.
 

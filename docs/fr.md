@@ -119,14 +119,15 @@ Un appareil Gladys par **couleur** de Tilt (« Tilt Red », « Tilt Blue »...) 
   remplacée revient dans les 24 heures (A, puis B, puis A : deux Tilt qui
   se relaient), la couleur est **verrouillée** : rien n'est envoyé pour
   elle, et le statut affiche « deux Tilt de cette couleur (adresses MAC qui
-  alternent) : activez « ID by MAC » sur le Tilt Pi », jusqu'à ce qu'une
-  seule adresse ait été lue seule pendant 24 heures. Le verrou est gardé
-  sous `/data` : ni un redémarrage ni une configuration enregistrée ne le
-  lèvent.
-  Activez plutôt l'option **« ID by MAC »** du Tilt Pi : chaque Tilt a alors
-  son entrée (`RED:aa:bb:...`), lue comme la couleur rouge ; si deux entrées
-  ont la même couleur, aucune n'est envoyée (« deux Tilt de cette
-  couleur »).
+  alternent) : un seul Tilt par couleur est pris en charge », jusqu'à ce
+  qu'une seule adresse ait été lue seule pendant 24 heures, sur au moins 12
+  lectures (la moitié des lectures d'une journée, à l'intervalle choisi).
+  Le verrou est gardé sous `/data` : ni un redémarrage ni une configuration
+  enregistrée ne le lèvent.
+  **Un seul Tilt par couleur est pris en charge.** L'option « ID by MAC » du
+  Tilt Pi donne à chaque Tilt son entrée (`RED:aa:bb:...`), lue comme la
+  couleur rouge ; mais si deux entrées ont la même couleur, aucune n'est
+  envoyée non plus (« deux Tilt de cette couleur »).
 - Un appareil créé plus tard reçoit la dernière mesure, datée, si elle a
   moins de 15 minutes.
 

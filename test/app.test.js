@@ -175,15 +175,15 @@ const MAC_A = 'AA:BB:CC:DD:EE:01';
 const MAC_B = 'AA:BB:CC:DD:EE:02';
 
 /** A red Tilt read every `step`: `read(mac, sg)` reads one entry of that MAC. */
-async function redOnly({ storage } = {}) {
-  const s = await setup({ devices: devicesFor('red'), start: false, storage });
+async function redOnly({ storage, config = CONFIG } = {}) {
+  const s = await setup({ devices: devicesFor('red'), start: false, storage, config });
   s.read = async (mac, sg, step = 5 * MIN) => {
     s.tilt.body = (c) => [entry('red', { mac, sg, stamp: c.wall - 1_000 })];
     s.clock.advance(step);
     await s.app.tick();
   };
   s.tilt.body = (c) => [entry('red', { mac: MAC_A, sg: 1.05, stamp: c.wall - 1_000 })];
-  await s.app.start(CONFIG);
+  await s.app.start(config);
   s.published = () => statesOf(s.gladys, `${RED}:gravity`).map((st) => st.state);
   return s;
 }
@@ -201,23 +201,39 @@ test('a replaced Tilt (A -> B, A never back) counts again after 2 reads', async 
 });
 
 test('A -> B -> A locks the colour until one MAC is read alone for 24 hours', async () => {
-  const { read, published, gladys, app } = await redOnly();
-  await read(MAC_B, 1.008);
-  await read(MAC_B, 1.007);
+  const config = { ...CONFIG, poll_interval: 60 }; // 12 reads needed
+  const { read, published, gladys, app } = await redOnly({ config });
+  const HOUR = 60 * MIN;
+  await read(MAC_B, 1.008, HOUR);
+  await read(MAC_B, 1.007, HOUR);
   assert.deepEqual(published(), [1.05, 1.007], 'looked like a replaced Tilt');
-  await read(MAC_A, 1.052);
+  await read(MAC_A, 1.052, HOUR);
   assert.match(
     gladys.fake.connectionStatus.message.en,
-    /Tilt Red \(two Tilts of this colour \(MAC addresses taking turns\): turn on "ID by MAC"/,
+    /Tilt Red \(two Tilts of this colour \(MAC addresses taking turns\): only one Tilt per colour is supported/,
   );
-  await read(MAC_A, 1.051, 12 * 60 * MIN);
-  await read(MAC_B, 1.006, 60 * MIN); // B again: the 24 hours start over
-  await read(MAC_B, 1.005, 23 * 60 * MIN);
-  await app.start(CONFIG); // a saved configuration never lifts the lock
-  assert.deepEqual(published(), [1.05, 1.007]);
-  await read(MAC_B, 1.004, 61 * MIN);
-  assert.deepEqual(published(), [1.05, 1.007, 1.004]);
+  await read(MAC_B, 1.006, HOUR); // B again: the 24 hours start over
+  // The wall clock jumps 25 hours ahead: one read of B alone is not enough.
+  await read(MAC_B, 1.005, 25 * HOUR);
+  await app.start(config); // a saved configuration never lifts the lock
+  for (let i = 0; i < 9; i += 1) {
+    await read(MAC_B, 1.004 - i / 1000, HOUR);
+  }
+  assert.deepEqual(published(), [1.05, 1.007], '11 reads of B alone: still locked');
+  await read(MAC_B, 1.0, HOUR);
+  assert.deepEqual(published(), [1.05, 1.007, 1.0], '12 reads and 24 hours: lifted');
   assert.doesNotMatch(JSON.stringify(app.store.get()), /AA:BB/i, 'only fingerprints in /data');
+});
+
+test('a clock set back: a replaced MAC seen "in the future" still locks', async () => {
+  const { read, published, gladys, clock } = await redOnly();
+  await read(MAC_B, 1.008);
+  await read(MAC_B, 1.007); // A replaced, last read at about NOW
+  clock.wall -= 60 * MIN;
+  await read(MAC_A, 1.052);
+  await read(MAC_A, 1.051);
+  assert.deepEqual(published(), [1.05, 1.007]);
+  assert.match(gladys.fake.connectionStatus.message.en, /only one Tilt per colour/);
 });
 
 test('the lock survives a restart', async () => {
@@ -239,7 +255,7 @@ test('the lock survives a restart', async () => {
   clock.advance(5 * MIN);
   await next.tick();
   assert.deepEqual(published(), [1.05]);
-  assert.match(gladys.fake.connectionStatus.message.en, /turn on "ID by MAC"/);
+  assert.match(gladys.fake.connectionStatus.message.en, /only one Tilt per colour is supported/);
 });
 
 test('two Tilts of one colour taking turns at random: nothing after the first return', async () => {

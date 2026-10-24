@@ -110,6 +110,10 @@ function tiltOf(value) {
     prevAt: instant(value.prevAt),
     lock: print(value.lock),
     lockSince: print(value.lock) ? instant(value.lockSince) : 0,
+    lockReads:
+      print(value.lock) && Number.isInteger(value.lockReads)
+        ? Math.min(Math.max(value.lockReads, 0), 100_000)
+        : 0,
   };
 }
 

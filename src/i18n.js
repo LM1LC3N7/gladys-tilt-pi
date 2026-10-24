@@ -19,8 +19,8 @@ export const REASONS = {
   stale: { en: 'no recent reading', fr: 'pas de mesure récente' },
   twice: { en: 'two Tilts of this colour', fr: 'deux Tilt de cette couleur' },
   locked: {
-    en: 'two Tilts of this colour (MAC addresses taking turns): turn on "ID by MAC" on the Tilt Pi',
-    fr: 'deux Tilt de cette couleur (adresses MAC qui alternent) : activez « ID by MAC » sur le Tilt Pi',
+    en: 'two Tilts of this colour (MAC addresses taking turns): only one Tilt per colour is supported',
+    fr: 'deux Tilt de cette couleur (adresses MAC qui alternent) : un seul Tilt par couleur est pris en charge',
   },
   mac: {
     en: 'MAC changed: two Tilts of this colour, or a Tilt replaced',

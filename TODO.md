@@ -75,9 +75,14 @@ copied, so nothing is added to `THIRD_PARTY_NOTICES.md`.
   replaced fingerprint coming back within 24 hours (A -> B -> A, or A
   during B's confirmation; wall-clock instants kept under `/data`) locks
   the colour (`MAC_LOCK`): nothing published until a single fingerprint
-  has been read alone for 24 hours; another fingerprint restarts the 24
-  hours; neither a restart nor a saved configuration lifts it; status "turn
-  on ID by MAC". An unreadable MAC changes nothing.
+  has been read alone for 24 hours AND in at least max(12, a day of reads
+  / 2) reads (`lockReads` under `/data`: a clock jump or a day without
+  reads never lifts it, review r3); a fingerprint instant in the future (a
+  clock set back) counts as recent, so it locks; another fingerprint
+  restarts the 24 hours; neither a restart nor a saved configuration lifts
+  it; status "only one Tilt per colour is supported" (ID by MAC does not
+  help: two entries of one colour are not published either). An unreadable
+  MAC changes nothing.
 - **Units**: the core has no density category nor unit
   (`DEVICE_FEATURE_UNITS_BY_CATEGORY`, checked in
   `~/code/Gladys/server/utils/constants.js`): the gravity is an `unknown`

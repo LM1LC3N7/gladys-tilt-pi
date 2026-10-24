@@ -23,8 +23,8 @@ the notes of the version's GitHub Release.
   address on a colour holds its values back until the same new address is
   read twice in a row (a replaced Tilt); an address already replaced coming
   back within 24 hours (two Tilts taking turns) locks the colour, kept
-  across restarts, until a single address is read alone for 24 hours (the
-  status asks to turn on "ID by MAC").
+  across restarts, until a single address is read alone for 24 hours and
+  in enough reads (the status says only one Tilt per colour is supported).
 - A Tilt Pi hearing no Tilt (`{}`) is a working Tilt Pi, not an error.
 - Read every 5 minutes by default, never faster: not by the test button, a
   reconnection, a saved configuration, the Discovery tab nor a restart.
