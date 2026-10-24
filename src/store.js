@@ -156,15 +156,17 @@ export class Store {
 
   /**
    * Update the entry. A change is written at once (a pause, a new Tilt: one
-   * per request at most), or with `defer` at the next allowed instant.
+   * per request at most), or with `defer` at the next allowed instant, but
+   * not before `flushAfter` ms: a deferred write must never take the write
+   * slot of the next read (which writes the whole entry anyway).
    */
-  update(changes, { defer = false } = {}) {
+  update(changes, { defer = false, flushAfter = 0 } = {}) {
     const previous = this.entry;
     const next = { ...previous, ...changes };
     this.entry = next;
     if (JSON.stringify(next) !== JSON.stringify(previous)) {
       if (defer) {
-        this.markDirty();
+        this.markDirty(flushAfter);
       } else {
         this.dirty = true;
         this.write();
@@ -187,16 +189,19 @@ export class Store {
     return now >= this.writableAt();
   }
 
-  markDirty() {
+  markDirty(flushAfter = 0) {
     this.dirty = true;
-    this.scheduleFlush();
+    this.scheduleFlush(flushAfter);
   }
 
-  scheduleFlush() {
+  scheduleFlush(flushAfter = 0) {
     if (this.flushTimer !== undefined) {
       return;
     }
-    const delay = Math.min(WRITE_GAP, Math.max(0, this.writableAt() - this.now()));
+    const delay = Math.max(
+      flushAfter,
+      Math.min(WRITE_GAP, Math.max(0, this.writableAt() - this.now())),
+    );
     this.flushTimer = this.timers.setTimeout(() => {
       this.flushTimer = undefined;
       this.flush();

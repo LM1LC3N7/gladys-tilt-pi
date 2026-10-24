@@ -301,10 +301,12 @@ export class TiltPiApp {
     this.readOk = true;
     this.pause = { until: 0, setAt: 0 };
     // A new Tilt or the end of a pause is written at once; the keys of the
-    // readings with the next allowed write (at most once per minute).
+    // readings with the next read (it writes the whole entry), or past it
+    // if it does not happen: never in the slot of that read, which would
+    // push it back a whole minute (one read every other interval at 1 min).
     this.store.update(
       { pausedUntil: 0, streak: 0, tilts: this.serialize() },
-      { defer: !added && !paused },
+      { defer: !added && !paused, flushAfter: this.intervalMs() + TICK },
     );
     await this.publish();
     if (generation === this.generation) {

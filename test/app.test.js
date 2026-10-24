@@ -678,3 +678,76 @@ test('the test button without an address answers at once', async () => {
   assert.match(JSON.stringify(answer), /Enter the address/);
   assert.equal(reads(), 0);
 });
+
+test('a read every interval at 1 minute: a deferred write never takes the slot of a read', async () => {
+  // Timers that fire by themselves in the order of their deadlines (ties: the
+  // first armed first, as Node does), on a virtual clock: the race of a real
+  // clock, where a deferred write and the next read fall due at once.
+  const clock = createClock(NOW);
+  let seq = 0;
+  const due = new Map();
+  const timers = {
+    setTimeout: (fn, ms) => {
+      const id = ++seq;
+      due.set(id, { at: clock.mono + Math.max(0, ms), fn, id, order: id });
+      return id;
+    },
+    setInterval: (fn, ms) => {
+      const id = ++seq;
+      // Re-armed after each run: it then fires after a timer armed before.
+      const again = () => {
+        due.set(id, { at: clock.mono + ms, fn: () => (again(), fn()), id, order: ++seq });
+      };
+      again();
+      return id;
+    },
+    clearTimeout: (id) => due.delete(id),
+    clearInterval: (id) => due.delete(id),
+  };
+  const storage = timedStorage(clock);
+  fake = installFetch([
+    [
+      /\/macid\/all$/,
+      () =>
+        json(
+          [entry('red', { stamp: clock.wall - 1_000, sg: 1 + (clock.wall % 997) / 10_000 })],
+          200,
+          {
+            date: new Date(clock.wall).toUTCString(),
+          },
+        ),
+    ],
+  ]);
+  const gladys = createFakeGladys({ selector: 'tilt-pi', devices: devicesFor('red') });
+  await gladys.connect();
+  const app = new TiltPiApp({
+    gladys,
+    logger: recordingLogger(),
+    now: () => clock.wall,
+    mono: () => clock.mono,
+    timers,
+    storage,
+  });
+  const config = { ...CONFIG, poll_interval: 1 };
+  await app.start(config);
+  const readAt = [clock.mono];
+  const end = clock.mono + 6 * MIN - 1;
+  for (;;) {
+    const next = [...due.values()].sort((a, b) => a.at - b.at || a.order - b.order)[0];
+    if (!next || next.at > end) {
+      break;
+    }
+    due.delete(next.id);
+    clock.advance(next.at - clock.mono);
+    const before = fake.calls.length;
+    await next.fn();
+    await new Promise((r) => setImmediate(r));
+    if (fake.calls.length > before) {
+      readAt.push(clock.mono);
+    }
+  }
+  app.stop();
+  const gaps = readAt.slice(1).map((t, i) => t - readAt[i]);
+  assert.deepEqual(gaps, [MIN, MIN, MIN, MIN, MIN], 'six reads, 60 s apart');
+  assert.equal(fake.calls.length, 6);
+});
